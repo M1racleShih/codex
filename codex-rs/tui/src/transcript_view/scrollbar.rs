@@ -96,7 +96,7 @@ impl TranscriptView {
         for row in 0..area.height {
             let cell = &mut buf[(x, area.y + row)];
             if (track.thumb_top..track.thumb_top + track.thumb_len).contains(&row) {
-                cell.set_symbol("┃").set_style(
+                cell.set_symbol("█").set_style(
                     crate::style::user_message_style()
                         .fg(crate::style::user_message_accent_color()),
                 );

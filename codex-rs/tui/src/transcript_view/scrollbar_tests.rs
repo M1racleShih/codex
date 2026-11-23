@@ -51,7 +51,7 @@ fn pointer_drags_through_one_tall_message_and_returns_to_following() {
     let mut view = TranscriptView::default();
     let buf = paint(&mut view, &cells, Some(RAIL));
     let bottom = BODY.bottom() - 1;
-    assert_eq!(buf[(RAIL, bottom)].symbol(), "┃");
+    assert_eq!(buf[(RAIL, bottom)].symbol(), "█");
     let middle = BODY.y + BODY.height / 2;
     let left = MouseButton::Left;
     assert!(matches!(
@@ -71,7 +71,7 @@ fn pointer_drags_through_one_tall_message_and_returns_to_following() {
         .parse::<usize>()
         .unwrap();
     assert!((40..85).contains(&first));
-    assert_eq!(mid[(RAIL, middle)].symbol(), "┃");
+    assert_eq!(mid[(RAIL, middle)].symbol(), "█");
     view.handle_scrollbar_mouse(mouse(Up(left), 0, bottom + 1), &cells);
     assert!(view.is_following());
     assert!(

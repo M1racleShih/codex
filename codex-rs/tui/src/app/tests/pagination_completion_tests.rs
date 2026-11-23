@@ -820,7 +820,7 @@ async fn scrollbar_drag_prepends_one_history_page_without_moving_the_visible_ans
     let x = size.width - 1;
     let buffer = crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal);
     let thumb_y = (0..size.height)
-        .find(|&y| buffer[(x, y)].symbol() == "┃")
+        .find(|&y| buffer[(x, y)].symbol() == "█")
         .expect("visible thumb");
     let top_y = (0..thumb_y)
         .find(|&y| buffer[(x, y)].symbol() == "│")
