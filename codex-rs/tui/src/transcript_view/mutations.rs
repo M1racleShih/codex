@@ -46,7 +46,7 @@ impl TranscriptView {
         if range.is_empty() {
             return;
         }
-        self.invalidate_turn_details_from(range.start);
+        self.invalidate_history_from(range.start);
         self.retain_search_origin(cells, range.clone());
         if range.end == cells.len() && self.last_tail == cells.last().map(EntryKey::cell) {
             self.last_tail = Some(EntryKey::cell(replacement));
@@ -94,7 +94,7 @@ impl TranscriptView {
         if range.is_empty() {
             return;
         }
-        self.invalidate_turn_details_from(range.start);
+        self.invalidate_history_from(range.start);
         self.retain_search_origin(cells, range.clone());
         // Older history may extend the final group without introducing new activity.
         if range.end == cells.len() && self.last_tail == cells.last().map(EntryKey::cell) {
@@ -166,6 +166,7 @@ impl TranscriptView {
         let Some((tail, preceding)) = cells.split_last() else {
             return;
         };
+        self.invalidate_scrollbar_from(preceding.len());
         self.retain_search_origin(cells, preceding.len()..cells.len());
         let tail_key = EntryKey::cell(tail);
         if self.last_tail == Some(tail_key) {

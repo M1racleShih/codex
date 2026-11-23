@@ -453,6 +453,7 @@ impl TranscriptView {
         self.disclosure.clamp_after_collapse = collapsing;
         self.disclosure.focused = Some((key, ids));
         self.position = Position::Reading(anchor);
+        self.invalidate_scrollbar_from(0);
         self.cache.clear();
         self.live_key = None;
         self.live_separated = None;

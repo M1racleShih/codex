@@ -4,6 +4,7 @@
 //! Stable cells also invalidate when animation ticks, syntax themes, or terminal colors change.
 
 use crate::history_cell::ActivityDisclosure;
+use crate::history_cell::AgentMarkdownCell;
 use crate::key_hint::ShortcutHint;
 use crate::keymap::KeymapContext;
 use std::sync::Weak;
@@ -64,6 +65,7 @@ fn cell_content_layout(
     mode: HistoryRenderMode,
     presentation: CellPresentation,
     shortcut: Option<ShortcutHint>,
+    measuring_rows: bool,
 ) -> TextLayout {
     let mut layout = if presentation.disclosure {
         activity_layout(
@@ -81,10 +83,15 @@ fn cell_content_layout(
             shortcut,
         )
     } else {
-        TextLayout::new(
-            crate::history_cell::fullscreen_session_lines(cell, width, presentation.detailed, mode),
-            width,
-        )
+        let lines = if measuring_rows
+            && (presentation.detailed || mode == HistoryRenderMode::Rich)
+            && let Some(markdown) = cell.as_any().downcast_ref::<AgentMarkdownCell>()
+        {
+            markdown.measure_retained_hyperlink_lines(width)
+        } else {
+            crate::history_cell::fullscreen_session_lines(cell, width, presentation.detailed, mode)
+        };
+        TextLayout::new(lines, width)
     };
     if let Some(protocol) = presentation.image_protocol
         && let Some(path) = cell.image_path()
@@ -115,6 +122,8 @@ pub(super) struct LayoutCache {
     entries: Vec<CachedLayout>,
     frame: u64,
     render_state: Option<RenderState>,
+    render_revision: u64,
+    measuring_rows: bool,
 }
 
 #[derive(PartialEq, Eq)]
@@ -159,7 +168,7 @@ impl TranscriptView {
         let disclosure = !self.detailed && mode == HistoryRenderMode::Rich && !ids.is_empty();
         let manually_expanded = self.disclosure.is_expanded(&ids);
         let reveal_image = ids.is_empty() || manually_expanded || self.detailed;
-        if manually_expanded {
+        if manually_expanded && !self.cache.measuring_rows {
             self.disclosure.expanded.extend(ids);
         }
         CellPresentation {
@@ -250,6 +259,7 @@ impl TranscriptView {
             return Some(Arc::new(TextLayout::new(Vec::new(), width)));
         }
         let mode = self.mode;
+        let measuring_rows = self.cache.measuring_rows;
         let mut presentation = self.content_presentation(cell.as_ref(), full_content, mode);
         let mut turn_header = None;
         if !full_content && let Some(row) = self.turn_row(cells, index) {
@@ -262,7 +272,7 @@ impl TranscriptView {
                     turn_header = Some(format!("{arrow} {label}"));
                 }
                 turn_details::TurnRow::Tools(_) => {
-                    if presentation.expanded {
+                    if presentation.expanded && !measuring_rows {
                         self.disclosure.expanded.extend(ids.iter().cloned());
                     }
                     return Some(self.cache.get(cell, width, presentation, || {
@@ -302,6 +312,7 @@ impl TranscriptView {
                                 mode,
                                 previous_presentation,
                                 shortcut,
+                                measuring_rows,
                             )
                         })
                 })
@@ -311,8 +322,14 @@ impl TranscriptView {
         presentation.shares_prompt_background = shares_prompt_background;
         presentation.turn_tip_space = self.turn_tip_key == Some(EntryKey::cell(cell));
         Some(self.cache.get(cell, width, presentation, || {
-            let mut layout =
-                cell_content_layout(cell.as_ref(), width, mode, presentation, shortcut);
+            let mut layout = cell_content_layout(
+                cell.as_ref(),
+                width,
+                mode,
+                presentation,
+                shortcut,
+                measuring_rows,
+            );
             if shares_prompt_background {
                 layout = layout.without_leading_blank_row();
             }
@@ -325,6 +342,17 @@ impl TranscriptView {
 }
 
 impl LayoutCache {
+    pub(super) fn for_measurement() -> Self {
+        Self {
+            measuring_rows: true,
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn render_revision(&self) -> u64 {
+        self.render_revision
+    }
+
     pub(super) fn has_mutable_source(&self) -> bool {
         self.entries.iter().any(|entry| {
             entry
@@ -347,6 +375,7 @@ impl LayoutCache {
         if self.render_state.as_ref() != Some(&state) {
             self.entries.clear();
             self.render_state = Some(state);
+            self.render_revision = self.render_revision.wrapping_add(1);
         }
     }
 

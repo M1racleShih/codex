@@ -789,6 +789,7 @@ impl TranscriptView {
 
     /// End the pointer gesture without discarding selected text when input ownership changes.
     pub(crate) fn end_drag(&mut self) {
+        self.clear_scrollbar();
         self.follow_control = Default::default();
         if self.has_pending_latest_selection() {
             self.position = Position::Latest;

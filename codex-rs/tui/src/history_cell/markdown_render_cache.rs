@@ -32,6 +32,16 @@ impl MarkdownRenderCache {
         list_spacing: ListSpacing,
         render: impl FnOnce() -> Vec<HyperlinkLine>,
     ) -> Vec<HyperlinkLine> {
+        self.render_with_retention(width, list_spacing, /*retain*/ true, render)
+    }
+
+    pub(super) fn render_with_retention(
+        &self,
+        width: u16,
+        list_spacing: ListSpacing,
+        retain: bool,
+        render: impl FnOnce() -> Vec<HyperlinkLine>,
+    ) -> Vec<HyperlinkLine> {
         let key = MarkdownRenderCacheKey {
             width,
             list_spacing,
@@ -49,7 +59,29 @@ impl MarkdownRenderCache {
         }
 
         let lines = render();
-        *cached = Some((key, lines.clone()));
+        if retain {
+            *cached = Some((key, lines.clone()));
+        }
         lines
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn measurement_does_not_replace_retained_lines() {
+        let cache = MarkdownRenderCache::default();
+        let spacing = ListSpacing::Uniform;
+        cache.render(/*width*/ 40, spacing, || vec!["retained".into()]);
+        cache.render_with_retention(
+            /*width*/ 20,
+            spacing,
+            /*retain*/ false,
+            || vec!["measured".into()],
+        );
+
+        assert_eq!(cache.cached.lock().unwrap().as_ref().unwrap().0.width, 40);
     }
 }

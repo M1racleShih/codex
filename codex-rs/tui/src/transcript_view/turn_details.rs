@@ -307,7 +307,8 @@ impl TranscriptView {
         (summary, expanded)
     }
 
-    pub(crate) fn invalidate_turn_details_from(&mut self, index: usize) {
+    pub(crate) fn invalidate_history_from(&mut self, index: usize) {
+        self.invalidate_scrollbar_from(index);
         if let Some(details) = &mut self.turn_details {
             details.source = None;
             if index < details.start {
@@ -374,6 +375,7 @@ impl TranscriptView {
         {
             start = 0;
         }
+        let first_changed = start;
         details.rows.truncate(start);
         details.pending.retain(|(index, _)| *index < start);
         let retained_end = held.map(<[_]>::len);
@@ -386,6 +388,7 @@ impl TranscriptView {
         }
         details.indexed_snapshot = held.is_some();
         details.source = Some(source);
+        self.invalidate_scrollbar_from(first_changed);
         self.cache.clear_summaries();
     }
 

@@ -27,6 +27,7 @@ use crate::pager_overlay::TranscriptHistoryState;
 use crate::sidebar_tab_strip::TabState;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::transcript_image::ImagePlacement;
+use crate::transcript_view::ScrollbarAction;
 use crate::transcript_view::TranscriptView;
 use crate::transcript_view::ViewAction;
 use crate::turn_tip::TurnTip;
@@ -91,6 +92,7 @@ impl ConversationFrame {
 pub(super) struct PreparedConversation {
     floating_shortcuts: bool,
     area: Rect,
+    content_width: u16,
     transcript_width: u16,
     composer: Option<ComposerState>,
     composer_hint: Option<HyperlinkLine>,
@@ -132,7 +134,7 @@ impl PreparedConversation {
             }
             selection.render(frame.buffer);
         }
-        chat_widget.note_rendered_width(self.area.width);
+        chat_widget.note_rendered_width(self.content_width);
         if let Some(position) = bottom.cursor_pos(bottom_area)
             && self.area.contains(position.into())
         {
@@ -208,9 +210,26 @@ impl App {
         true
     }
 
+    fn is_agent_reader(&self) -> bool {
+        self.docked_agent().is_some_and(|(_, id)| {
+            self.current_displayed_thread_id() == Some(id)
+                && self.agent_navigation.is_parent_owned(id)
+        }) && self.chat_widget.no_modal_or_popup_active()
+            && !self.chat_widget.is_read_only_view()
+    }
+
+    fn scrollbar_content_width(&self, width: u16) -> u16 {
+        width
+            - u16::from(
+                self.local_settings.tui.transcript_scrollbar
+                    && width >= 3
+                    && !self.is_agent_reader(),
+            )
+    }
+
     pub(super) fn sync_owned_transcript(&mut self, width: u16) -> bool {
         let chat_widget = &self.chat_widget;
-        let transcript_width = chat_widget.history_wrap_width(width);
+        let transcript_width = chat_widget.history_wrap_width(self.scrollbar_content_width(width));
         let view = &mut self.transcript_view;
         view.mouse_scroll_speed = self.local_settings.tui.mouse_scroll_speed.unwrap_or(1.0);
         view.primary_selection = self.right_click_paste_environment.primary;
@@ -676,7 +695,10 @@ impl App {
         self.conversation_frame.sidebar = None;
         self.conversation_frame.chat_strip = None;
         let area = self.conversation_area(viewport);
-        if let Some((previous, reflowed)) = self.chat_widget.resize_owned_conversation(area.width) {
+        let content_width = self.scrollbar_content_width(area.width);
+        if let Some((previous, reflowed)) =
+            self.chat_widget.resize_owned_conversation(content_width)
+        {
             self.transcript_view
                 .rebind_observed_live_revision(previous, reflowed);
         }
@@ -693,8 +715,8 @@ impl App {
         self.sync_owned_transcript(area.width);
         let transcript_width = self
             .chat_widget
-            .history_wrap_width(area.width)
-            .min(area.width);
+            .history_wrap_width(content_width)
+            .min(content_width);
         let composer_hint = if self
             .chat_widget
             .rendered_selection
@@ -721,6 +743,7 @@ impl App {
         PreparedConversation {
             floating_shortcuts: false,
             area,
+            content_width,
             transcript_width,
             composer,
             composer_hint,
@@ -736,12 +759,8 @@ impl App {
         frame: &mut Frame<'_>,
         prepared: &PreparedConversation,
     ) -> PaintedConversation {
-        if self.docked_agent().is_some_and(|(_, id)| {
-            self.current_displayed_thread_id() == Some(id)
-                && self.agent_navigation.is_parent_owned(id)
-        }) && self.chat_widget.no_modal_or_popup_active()
-            && !self.chat_widget.is_read_only_view()
-        {
+        if self.is_agent_reader() {
+            self.transcript_view.clear_scrollbar();
             return self.paint_agent_reader(frame, prepared);
         }
         let PreparedConversation {
@@ -911,6 +930,15 @@ impl App {
             frame.buffer,
             now,
         );
+        let scrollbar_column = (self.local_settings.tui.transcript_scrollbar
+            && transcript_width < area.width
+            && chat_widget.no_modal_or_popup_active()
+            && !unfocused
+            && !view.is_select_mode()
+            && !view.is_search_editing())
+        .then(|| area.x + transcript_width);
+        let measuring =
+            view.paint_scrollbar(scrollbar_column, frame.buffer, &self.transcript_cells);
         let first_image = frame.image_placements.len();
         prepared.paint_foreground(frame, chat_widget, view, &bottom, bottom_area);
         let animating =
@@ -923,7 +951,7 @@ impl App {
                 .turn_tip
                 .as_ref()
                 .and_then(|(surface, tip)| tip.rendered.get().map(|_| *surface)),
-            needs_redraw,
+            needs_redraw: needs_redraw || measuring,
             delayed_frames: [
                 feedback_tick,
                 blossom_tick,
@@ -1206,6 +1234,21 @@ impl App {
             };
             if mouse.kind != MouseEventKind::Moved && !wheel_ready {
                 self.refresh_owned_transcript(tui)?;
+            }
+            if self.chat_widget.no_modal_or_popup_active()
+                && let Some(action) = self
+                    .transcript_view
+                    .handle_scrollbar_mouse(*mouse, &self.transcript_cells)
+            {
+                if matches!(action, ScrollbarAction::LoadOlder)
+                    && let Some(id) = self.chat_widget.thread_id()
+                    && self.request_older_history_page(app_server, id)
+                {
+                    self.transcript_view.history = TranscriptHistoryState::LoadingOlder;
+                }
+                self.request_owned_history(tui, app_server);
+                tui.frame_requester().schedule_frame();
+                return Ok(true);
             }
             if self
                 .conversation_frame
