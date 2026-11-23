@@ -120,7 +120,14 @@ fn reaching_top_loads_one_page_and_keeps_text_under_the_pointer() {
     let y = track.area.y + track.thumb_top;
     view.handle_scrollbar_mouse(mouse(Down(left), RAIL, y), &cells);
     view.handle_scrollbar_mouse(mouse(Drag(left), RAIL, BODY.y.saturating_sub(1)), &cells);
-    assert!(text(&paint(&mut view, &cells, Some(RAIL)))[0].contains("earlier prompt"));
+    let new_page = text(&paint(&mut view, &cells, Some(RAIL)));
+    assert_eq!(view.start(&cells).0, 0, "{new_page:?}");
+    // User prompts include a top padding row in the transcript.
+    let first_text = new_page
+        .iter()
+        .find(|line| !line.trim().is_empty())
+        .unwrap();
+    assert!(first_text.contains("earlier prompt"), "{new_page:?}");
 }
 
 #[test]
