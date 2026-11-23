@@ -605,7 +605,7 @@ impl TranscriptView {
         inserted: Range<usize>,
         inserted_images: Option<Range<usize>>,
     ) {
-        self.invalidate_turn_details_from(/*index*/ 0);
+        self.invalidate_history_from(/*index*/ 0);
         // With only a header and live output, the first older page extends the canonical tail.
         if !inserted.is_empty()
             && inserted.end == cells.len()

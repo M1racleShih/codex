@@ -780,3 +780,93 @@ async fn sidebar_files_load_older_items_without_advancing_transcript_history() -
     assert_eq!(server.older_item_cursor(thread_id), Some(cursor.as_str()));
     Ok(())
 }
+
+#[tokio::test]
+async fn scrollbar_drag_prepends_one_history_page_without_moving_the_visible_answer() -> Result<()>
+{
+    let (mut app, _home, thread_id) =
+        completed_history_app(&["Oldest", "Middle", "Newest"]).await?;
+    let mut server = crate::start_embedded_app_server_for_picker(&app.config).await?;
+    let started = server
+        .resume_thread(
+            &app.local_settings,
+            app.config.clone(),
+            thread_id,
+            crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+        )
+        .await?;
+    app.enqueue_primary_thread_session(started.session, started.turns)
+        .await?;
+    let (event_tx, mut events) = tokio::sync::mpsc::unbounded_channel();
+    app.app_event_tx = crate::app_event_sender::AppEventSender::new(event_tx);
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    tui.set_owned_screen(true)?;
+    let size = Size::new(80, 16);
+    tui.terminal = crate::tui::Terminal::with_screen_size_and_cursor_position_for_test(
+        ratatui::backend::CrosstermBackend::new(std::io::stdout()),
+        size,
+        Default::default(),
+    );
+    app.local_settings.tui.transcript_scrollbar = true;
+    app.scrollback_has_older_history = server.has_older_history(thread_id);
+    assert!(app.scrollback_has_older_history);
+    app.transcript_view.history = TranscriptHistoryState::Partial;
+    app.transcript_cells = vec![Arc::new(PlainHistoryCell::new(
+        (0..50)
+            .map(|i| format!("Retained row {i:03}").into())
+            .collect(),
+    ))];
+    app.render_owned_transcript(&mut tui, size)?;
+    let x = size.width - 1;
+    let buffer = crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal);
+    let thumb_y = (0..size.height)
+        .find(|&y| buffer[(x, y)].symbol() == "█")
+        .expect("visible thumb");
+    let top_y = (0..thumb_y)
+        .find(|&y| buffer[(x, y)].symbol() == "│")
+        .expect("track above thumb");
+    for (kind, y) in [
+        (MouseEventKind::Down(MouseButton::Left), thumb_y),
+        (MouseEventKind::Drag(MouseButton::Left), top_y),
+    ] {
+        assert!(app.handle_owned_transcript_event(&mut tui, &mut server, &mouse(kind, x, y))?);
+    }
+    assert_eq!(
+        app.transcript_view.history,
+        TranscriptHistoryState::LoadingOlder
+    );
+    fn visible_answer(tui: &crate::tui::Tui, size: Size) -> Option<u16> {
+        let buf = crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal);
+        (0..size.height).find(|&y| {
+            (0..size.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+                .contains("Retained row 000")
+        })
+    }
+    app.render_owned_transcript(&mut tui, size)?;
+    let anchor_y = visible_answer(&tui, size).expect("top of the loaded answer");
+    let page = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let event = events.recv().await.expect("history request is pending");
+            if matches!(event, AppEvent::OlderThreadHistoryLoaded { .. }) {
+                break event;
+            }
+        }
+    })
+    .await?;
+    boxed_future!(app.handle_event(&mut tui, &mut server, page)).await?;
+    assert!(app.transcript_cells.len() > 1);
+    app.handle_owned_transcript_event(
+        &mut tui,
+        &mut server,
+        &mouse(MouseEventKind::Up(MouseButton::Left), x, top_y),
+    )?;
+    app.render_owned_transcript(&mut tui, size)?;
+    assert_eq!(visible_answer(&tui, size), Some(anchor_y));
+    if let Some(cursor) = server.older_item_cursor(thread_id) {
+        assert!(!server.is_older_history_page_pending(thread_id, cursor));
+    }
+    server.shutdown().await?;
+    Ok(())
+}

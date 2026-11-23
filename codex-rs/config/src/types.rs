@@ -983,6 +983,10 @@ pub struct Tui {
     #[serde(default = "default_true")]
     pub fullscreen_transcript: bool,
 
+    /// Show a draggable scrollbar for loaded history in the fullscreen transcript.
+    #[serde(default)]
+    pub transcript_scrollbar: bool,
+
     /// Summarize tool calls and collapse completed turns in the full-screen transcript. Defaults to `false`.
     #[serde(default)]
     pub collapse_turn_details: bool,

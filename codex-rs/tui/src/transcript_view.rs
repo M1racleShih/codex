@@ -18,6 +18,8 @@ mod input;
 mod layout;
 mod mutations;
 mod prompt_header;
+mod scrollbar;
+mod scrollbar_navigation;
 mod search;
 mod select_mode;
 mod selection;
@@ -54,6 +56,7 @@ pub(crate) use bookmark::TranscriptBookmark;
 pub(crate) use input::JumpTarget;
 pub(crate) use input::ViewAction;
 pub(crate) use layout::ActivityTranscriptLines;
+pub(crate) use scrollbar::ScrollbarAction;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum EntryKey {
@@ -103,6 +106,8 @@ pub(crate) struct TranscriptView {
     pub(crate) copy_on_select_clear_selection: bool,
     pub(crate) primary_selection: bool,
     position: Position,
+    scrollbar: scrollbar::Scrollbar,
+    scrollbar_navigation: scrollbar_navigation::ScrollbarNavigation,
     follow_control: follow_control::FollowControl,
     pub(crate) show_follow_control: bool,
     copy_feedback: Option<composer_gap::CopyFeedback>,
@@ -148,6 +153,8 @@ impl Default for TranscriptView {
             copy_on_select_clear_selection: false,
             primary_selection: false,
             position: Position::Latest,
+            scrollbar: Default::default(),
+            scrollbar_navigation: Default::default(),
             follow_control: follow_control::FollowControl::default(),
             show_follow_control: true,
             copy_feedback: None,
@@ -283,7 +290,8 @@ impl TranscriptView {
             row: start.1,
         };
         if matches!(self.position, Position::Reading(_))
-            && suppressed_prompt_header.as_ref() == Some(&header_position)
+            && (suppressed_prompt_header.as_ref() == Some(&header_position)
+                || self.scrollbar_keeps_header_hidden())
         {
             // Freezing follow must preserve a header that yielded to the next visible prompt.
             self.suppressed_prompt_header = Some(header_position);
@@ -658,6 +666,7 @@ impl TranscriptView {
 
     /// Hold the current reading position until every older page has arrived.
     pub(crate) fn jump_to_beginning(&mut self, cells: &[Arc<dyn HistoryCell>]) {
+        self.release_scrollbar_paging();
         if !self.detailed
             && !self.is_select_mode()
             && let Some(index) = cells
@@ -688,6 +697,7 @@ impl TranscriptView {
     }
 
     pub(crate) fn jump_to_latest(&mut self) {
+        self.release_scrollbar_paging();
         self.disclosure.resume_after_approval = None;
         self.cancel_search();
         self.cancel_beginning();
@@ -702,6 +712,7 @@ impl TranscriptView {
 
     pub(crate) fn scroll(&mut self, cells: &[Arc<dyn HistoryCell>], rows: isize) {
         if rows != 0 {
+            self.release_scrollbar_paging();
             self.disclosure.resume_after_approval = None;
             self.last_click = None;
             self.cancel_beginning();
@@ -760,6 +771,7 @@ impl TranscriptView {
     }
 
     pub(crate) fn jump_to_entry(&mut self, cells: &[Arc<dyn HistoryCell>], index: usize) {
+        self.release_scrollbar_paging();
         self.cancel_beginning();
         self.release_live_reading();
         let snapshot = self.snapshot_cells();
@@ -800,7 +812,9 @@ impl TranscriptView {
 
     pub(crate) fn needs_history(&mut self, cells: &[Arc<dyn HistoryCell>]) -> bool {
         self.search.needs_history(self.history)
-            || (self.search.allows_viewport_paging() && self.near_start(cells))
+            || (!self.scrollbar_holds_viewport_paging()
+                && self.search.allows_viewport_paging()
+                && self.near_start(cells))
     }
 
     pub(crate) fn near_start(&mut self, cells: &[Arc<dyn HistoryCell>]) -> bool {

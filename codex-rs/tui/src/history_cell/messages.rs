@@ -721,10 +721,19 @@ pub(super) fn normalize_whitespace_only_hyperlink_lines(
 }
 
 impl AgentMarkdownCell {
+    pub(crate) fn measure_retained_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.render_lines(
+            width,
+            crate::markdown_render::ListSpacing::Uniform,
+            /*retain*/ false,
+        )
+    }
+
     fn render_lines(
         &self,
         width: u16,
         list_spacing: crate::markdown_render::ListSpacing,
+        retain: bool,
     ) -> Vec<HyperlinkLine> {
         let render = || {
             let Some(wrap_width) =
@@ -765,7 +774,7 @@ impl AgentMarkdownCell {
         };
 
         if let Some(rendered_lines) = &self.rendered_lines {
-            rendered_lines.render(width, list_spacing, render)
+            rendered_lines.render_with_retention(width, list_spacing, retain, render)
         } else {
             render()
         }
@@ -782,11 +791,19 @@ impl HistoryCell for AgentMarkdownCell {
     }
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        self.render_lines(width, crate::markdown_render::ListSpacing::AfterMultiline)
+        self.render_lines(
+            width,
+            crate::markdown_render::ListSpacing::AfterMultiline,
+            /*retain*/ true,
+        )
     }
 
     fn retained_hyperlink_lines(&self, width: u16, _detailed: bool) -> Vec<HyperlinkLine> {
-        self.render_lines(width, crate::markdown_render::ListSpacing::Uniform)
+        self.render_lines(
+            width,
+            crate::markdown_render::ListSpacing::Uniform,
+            /*retain*/ true,
+        )
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
